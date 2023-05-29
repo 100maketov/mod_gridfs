@@ -27,11 +27,6 @@ Ubuntu pre-build instructions:
 sudo apt-get -y install wget g++ scons apache2 apache2-threaded-dev libboost-filesystem-dev libboost-system-dev libboost-thread-dev
 
 Ubuntu build instructions (MongoDB C++ driver v2.4):
-wget --no-check-certificate https://bitbucket.org/onyxmaster/mod_gridfs/get/release.tar.gz
-tar xzf release.tar.gz
-rm release.tar.gz
-mv onyxmaster-mod_gridfs-* mod_gridfs
-cd mod_gridfs
 wget http://downloads.mongodb.org/cxx-driver/mongodb-linux-x86_64-v2.4-latest.tgz
 tar xzf mongodb-linux-x86_64-v2.4-latest.tgz
 rm mongodb-linux-x86_64-v2.4-latest.tgz
