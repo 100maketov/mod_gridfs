@@ -488,7 +488,7 @@ static int gridfs_handler(request_rec *const request)
 						ap_set_last_modified(request);
 						const std::string& md5 = gridfile.getMD5();
 						if (!md5.empty())
-							apr_table_setn(request->headers_out, "ETag", md5.c_str());
+							apr_table_setn(request->headers_out, "ETag", string_to_hex(md5).c_str());
 						if (ap_meets_conditions(request) == HTTP_NOT_MODIFIED)
 						{
 							connection->done();
