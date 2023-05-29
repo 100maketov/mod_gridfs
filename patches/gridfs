@@ -1,0 +1,156 @@
+--- mongo-cxx-driver/src/mongo/client/gridfs.h	2013-08-04 08:00:36.000000000 +0400
++++ mongo-cxx-driver/src/mongo/client/gridfs.h	2014-10-25 22:47:19.000000000 +0400
+@@ -60,7 +60,7 @@
+          * @param dbName - root database name
+          * @param prefix - if you want your data somewhere besides <dbname>.fs
+          */
+-        GridFS( DBClientBase& client , const string& dbName , const string& prefix="fs" );
++        GridFS( DBClientBase& client , const string& dbName , const string& prefix="fs" , bool ensureIndexes = true );
+         ~GridFS();
+ 
+         /**
+@@ -103,22 +103,22 @@
+         /**
+          * returns a file object matching the query
+          */
+-        GridFile findFile( BSONObj query ) const;
++        GridFile findFile( BSONObj query , const string& readPrefMode = "" , const BSONObj* readPrefTags = 0 ) const;
+ 
+         /**
+          * equiv to findFile( { filename : filename } )
+          */
+-        GridFile findFile( const string& fileName ) const;
++        GridFile findFile( const string& fileName , const string& readPrefMode = "" , const BSONObj* readPrefTags = 0 ) const;
+ 
+         /**
+          * convenience method to get all the files
+          */
+-        auto_ptr<DBClientCursor> list() const;
++        auto_ptr<DBClientCursor> list( const string& readPrefMode = "" , const BSONObj* readPrefTags = 0 ) const;
+ 
+         /**
+          * convenience method to get all the files with a filter
+          */
+-        auto_ptr<DBClientCursor> list( BSONObj query ) const;
++        auto_ptr<DBClientCursor> list( BSONObj query , const string& readPrefMode = "" , const BSONObj* readPrefTags = 0 ) const;
+ 
+     private:
+         DBClientBase& _client;
+@@ -194,12 +194,14 @@
+         gridfs_offset write( const string& where ) const;
+ 
+     private:
+-        GridFile(const GridFS * grid , BSONObj obj );
++        GridFile(const GridFS * grid , BSONObj obj , const string& readPrefMode , const BSONObj* readPrefTags = 0 );
+ 
+         void _exists() const;
+ 
+         const GridFS * _grid;
+         BSONObj        _obj;
++        string         _readPrefMode;
++        BSONObj      _readPrefTags;
+ 
+         friend class GridFS;
+     };
+--- mongo-cxx-driver/src/mongo/client/gridfs.cpp	2014-03-25 03:58:28.000000000 +0400
++++ mongo-cxx-driver/src/mongo/client/gridfs.cpp	2014-10-25 23:23:27.000000000 +0400
+@@ -52,13 +52,15 @@
+     }
+ 
+ 
+-    GridFS::GridFS( DBClientBase& client , const string& dbName , const string& prefix ) : _client( client ) , _dbName( dbName ) , _prefix( prefix ) {
++    GridFS::GridFS( DBClientBase& client , const string& dbName , const string& prefix , const bool ensureIndexes ) : _client( client ) , _dbName( dbName ) , _prefix( prefix ) {
+         _filesNS = dbName + "." + prefix + ".files";
+         _chunksNS = dbName + "." + prefix + ".chunks";
+         _chunkSize = DEFAULT_CHUNK_SIZE;
+ 
+-        client.ensureIndex( _filesNS , BSON( "filename" << 1 ) );
+-        client.ensureIndex( _chunksNS , BSON( "files_id" << 1 << "n" << 1 ) , /*unique=*/true );
++        if ( ensureIndexes ) {
++            client.ensureIndex( _filesNS , BSON( "filename" << 1 ) );
++            client.ensureIndex( _chunksNS , BSON( "files_id" << 1 << "n" << 1 ) , /*unique=*/true );
++        }
+     }
+ 
+     GridFS::~GridFS() {
+@@ -184,25 +186,48 @@
+         }
+     }
+ 
+-    GridFile::GridFile(const GridFS * grid , BSONObj obj ) {
++    GridFile::GridFile(const GridFS * grid , BSONObj obj , const string& readPrefMode , const BSONObj* readPrefTags ) {
+         _grid = grid;
+         _obj = obj;
++        _readPrefMode = readPrefMode;
++        if (readPrefTags != 0 && !readPrefTags->isEmpty()) {
++            _readPrefTags = *readPrefTags;
++          }
+     }
+ 
+-    GridFile GridFS::findFile( const string& fileName ) const {
+-        return findFile( BSON( "filename" << fileName ) );
++    GridFile GridFS::findFile( const string& fileName, const string& readPrefMode , const BSONObj* readPrefTags ) const {
++        return findFile( BSON( "filename" << fileName ) , readPrefMode , readPrefTags );
+     };
+ 
+-    GridFile GridFS::findFile( BSONObj query ) const {
+-        query = BSON("query" << query << "orderby" << BSON("uploadDate" << -1));
+-        return GridFile( this , _client.findOne( _filesNS.c_str() , query ) );
+-    }
+-
+-    auto_ptr<DBClientCursor> GridFS::list() const {
+-        return _client.query( _filesNS.c_str() , BSONObj() );
+-    }
+-
+-    auto_ptr<DBClientCursor> GridFS::list( BSONObj o ) const {
++    GridFile GridFS::findFile( BSONObj query, const string& readPrefMode , const BSONObj* readPrefTags ) const {
++        BSONObjBuilder b;
++        b.append("query", query);
++        b.append("orderby", BSON("uploadDate" << -1));
++        if (!readPrefMode.empty()) {
++            BSONObjBuilder readPreference;
++            readPreference.append(Query::ReadPrefModeField.name(), readPrefMode);
++             if (readPrefTags != 0 && !readPrefTags->isEmpty()) {
++                readPreference.appendArray(Query::ReadPrefTagsField.name(), *readPrefTags);
++             }
++            b.append(Query::ReadPrefField.name(), readPreference.obj());
++        }
++        query = b.obj();
++        return GridFile( this , _client.findOne( _filesNS.c_str() , query ) , readPrefMode , readPrefTags );
++    }
++
++    auto_ptr<DBClientCursor> GridFS::list( const string& readPrefMode , const BSONObj* readPrefTags ) const {
++        return list( BSONObj() , readPrefMode , readPrefTags );
++    }
++
++    auto_ptr<DBClientCursor> GridFS::list( BSONObj o, const string& readPrefMode , const BSONObj* readPrefTags ) const {
++        if (!readPrefMode.empty()) {
++            BSONObjBuilder readPreference;
++            readPreference.append(Query::ReadPrefModeField.name(), readPrefMode);
++             if (readPrefTags != 0 && !readPrefTags->isEmpty()) {
++                readPreference.appendArray(Query::ReadPrefTagsField.name(), *readPrefTags);
++             }
++            o = BSON("query" << o << Query::ReadPrefField.name() << readPreference.obj());
++        }
+         return _client.query( _filesNS.c_str() , o );
+     }
+ 
+@@ -220,8 +245,17 @@
+         BSONObjBuilder b;
+         b.appendAs( _obj["_id"] , "files_id" );
+         b.append( "n" , n );
++        BSONObj q = b.obj();
++        if (!_readPrefMode.empty()) {
++            BSONObjBuilder readPreference;
++            readPreference.append(Query::ReadPrefModeField.name(), _readPrefMode);
++             if (!_readPrefTags.isEmpty()) {
++                readPreference.appendArray(Query::ReadPrefTagsField.name(), _readPrefTags);
++             }
++            q = BSON("query" << q << Query::ReadPrefField.name() << readPreference.obj());
++        }
+ 
+-        BSONObj o = _grid->_client.findOne( _grid->_chunksNS.c_str() , b.obj() );
++        BSONObj o = _grid->_client.findOne( _grid->_chunksNS.c_str() , q );
+         uassert( 10014 ,  "chunk is empty!" , ! o.isEmpty() );
+         return GridFSChunk(o);
+     }

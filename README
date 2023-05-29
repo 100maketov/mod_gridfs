@@ -1,0 +1,97 @@
+*** No longer developed -- see https://github.com/drivenet/gridfs_server/ ***
+
+This is an Apache 2.2+ module that supports serving files from MongoDB GridFS.
+
+See http://www.mongodb.org/ and http://docs.mongodb.org/manual/core/gridfs/ for more information.
+
+See LICENSE file for licensing details.
+
+Availability:
+This code is available free of charge from https://bitbucket.org/onyxmaster/mod_gridfs/ (be sure to grab the "release" tag of the latest branch).
+Old driver that is written in C and used MongoDB C driver is still available in the "c-driver" branch.
+
+Building (see next section for Ubuntu fast-forward instructions):
+Make sure you have g++, SConstruct and boost libraries (filesystem, system, thread) installed
+Install Apache 2.2+ and APXS (choose worker MPM)
+Grab the module from https://bitbucket.org/onyxmaster/mod_gridfs/, remember the absolute path to the directory (referenced as /path/to/mod_gridfs later on)
+Grab MongoDB C++ driver from http://dl.mongodb.org/dl/cxx-driver (2.1+ required, 2.6+ not yet supported, don't use *-latest and unreleased versions), unpack it and go to its directory
+Fix the driver build environment (build static library with PIC to allow module to be built as a shared library):
+	echo 'env.Append(CCFLAGS="-fPIC")' >> SConstruct
+Apply the GridFS patch (might need fixing for different driver versions):
+	patch -d src/mongo/client < /path/to/mod_gridfs/patches/gridfs
+Build the driver:
+	scons
+Build+install the module with make
+
+Ubuntu pre-build instructions:
+sudo apt-get -y install wget g++ scons apache2 apache2-threaded-dev libboost-filesystem-dev libboost-system-dev libboost-thread-dev
+
+Ubuntu build instructions (MongoDB C++ driver v2.4):
+wget --no-check-certificate https://bitbucket.org/onyxmaster/mod_gridfs/get/release.tar.gz
+tar xzf release.tar.gz
+rm release.tar.gz
+mv onyxmaster-mod_gridfs-* mod_gridfs
+cd mod_gridfs
+wget http://downloads.mongodb.org/cxx-driver/mongodb-linux-x86_64-v2.4-latest.tgz
+tar xzf mongodb-linux-x86_64-v2.4-latest.tgz
+rm mongodb-linux-x86_64-v2.4-latest.tgz
+mv mongo-cxx-driver-v2.4 mongo-cxx-driver
+echo 'env.Append(CCFLAGS="-fPIC")' >> mongo-cxx-driver/SConstruct
+patch -d mongo-cxx-driver/src/mongo/client < patches/gridfs
+scons -C mongo-cxx-driver
+make -C gridfs
+
+Ubuntu pre-installation instructions:
+sudo apt-get -y install apache2 libstdc++6 libboost-filesystem[version] libboost-system[version] libboost-thread[version] && sudo apt-get -y install make apache2-threaded-dev
+
+Ubuntu installation instructions (copy mod_gridfs directory to a target machine first):
+cd mod_gridfs
+sudo make -C gridfs install
+
+Ubuntu post-installation instructions (cleanup, not required but recommended for production machines):
+sudo apt-get -y purge make apache2-threaded-dev && sudo apt-get -y --purge autoremove
+
+Configuration:
+GridFSConnection -- sets connection string ("host[:port]" for single hosts, "replicaSetName/host[:port],[host[:port], ...]" for replica sets)
+GridFSDatabase <database> -- sets database name
+GridFSCollectionPrefix <collection prefix> -- optional, sets collection prefix (default is "fs")
+GridFSFilenameField <filename field> -- optional, sets filename field (default is "filename")
+GridFSFilenameFieldType <filename field type> -- optional, sets filename field type (default is "string", also available: "objectid")
+GridFSCacheMaxAge <max age> -- optional, sets cache max age in seconds (default is 1 week, maximum is 10 years), set to 0 to disable expiration caching (see Notes below)
+GridFSConnectTimeout <timeout> -- optional, sets MongoDB connection timeout in seconds (default is 5 seconds)
+GridFSReadPrefMode <mode> -- optional, sets MongoDB read preference mode (MongoDB v2.2+, http://docs.mongodb.org/manual/core/read-preference/#read-preference-modes)
+GridFSReadPrefTags <tagSets>* -- optional, sets MongoDB read preference tag sets (MongoDB v2.2+, see http://docs.mongodb.org/manual/core/read-preference/#tag-sets), requires GridFSReadPrefMode to be properly set
+GridFSUsername <username> -- optional, sets MongoDB authentication user name
+GridFSPassword <password> -- optional, sets MongoDB authentication password
+
+* Multiple tag sets are supported, for example:
+GridFSReadPrefTags "{dc:'east', use:'production'}, {dc:'east', use:'reporting'}, {dc:'east'}"
+
+Configuration example:
+GridFSConnection rsTest/db1,db2
+GridFSDatabase my_database
+GridFSReadPrefMode nearest
+GridFSReadPrefTags {group:'b1'}
+
+Implementation notes:
+This module was developed to serve static content that is cached on frontend reverse proxies, hence by default it sets the following headers:
+	Cache-Control: public, max-age=<max_age>
+	Expires: <Date+max_age>
+	Last-Modified: <uploadDate>
+	Etag: <md5> (if MD5 is available for file)
+You can disable "Cache-Control" and "Expires" headers by setting GridFSCacheMaxAge to 0.
+
+Content-type, if not specified in GridFS file "contentType" field, is automatically determined using mod_mime (or any other type checker module that works without accessing file contents).
+Also, it supports HEAD requests, conditional queries (If-Modified-Since and/or If-None-Match with proper 304 Not Modified response).
+It doesn't support range queries (not going to be implemented soon).
+
+Known problems:
+If you're using gcc version less than 4.5, Apache parent process would crash when reloading modules (on a restart after module list is updated).
+This is a known problem with gcc and libstdc++. Unfortunately, the only workaround is to upgrade your compiler and standard C++ library.
+
+Credits:
+Written by Aristarkh Zagorodnikov
+Initial context (location) awareness suggestion and implementation by Stafford Brunk (https://bitbucket.org/wingrunr21)
+Authentication support implementation by Radoslav Hampartsumyan (https://bitbucket.org/rado_h)
+Custom filename field by ggrundik (https://bitbucket.org/ggrundik)
+Custom filename field type by Dmitry Yantsen (https://bitbucket.org/dyantsen)
