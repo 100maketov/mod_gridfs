@@ -365,6 +365,18 @@ static const char *gridfs_read_pref_tags_command(cmd_parms *const command, void 
 	return 0;
 }
 
+std::string string_to_hex(const std::string& input)
+{
+	static const char hex_digits[] = "0123456789ABCDEF";
+	std::string output;
+	output.reserve(input.length() * 2);
+	for (unsigned char c : input)
+	{
+		output.push_back(hex_digits[c >> 4]);
+		output.push_back(hex_digits[c & 15]);
+	}
+	return output;
+}
 //	Handles request
 static int gridfs_handler(request_rec *const request)
 {
